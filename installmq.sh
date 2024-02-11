@@ -1,15 +1,14 @@
 #!/bin/bash
 
-# Path to the bash script you want to distribute
-script_path="/path/to/your/update-components.sh"
+# Path to the bash script you want to copy
+BASH_SCRIPT_PATH="/path/to/update-dockefile.sh"
 
-# Starting directory for the search, change this to the root directory of your project
-search_root="/path/to/search/root"
+# Base directory to start searching for Dockerfiles
+SEARCH_BASE_DIR="/path/to/search/directory"
 
-# Find directories containing Dockerfile and copy the bash script to each
-find "$search_root" -type f -name "Dockerfile" -exec dirname {} \; | while read -r dir; do
-    echo "Copying $script_path to $dir"
-    cp "$script_path" "$dir"
+# Find directories containing a Dockerfile and copy the bash script into each
+find "$SEARCH_BASE_DIR" -type f -name 'Dockerfile' | while read dockerfile; do
+  DIR_PATH=$(dirname "$dockerfile")
+  echo "Copying $BASH_SCRIPT_PATH to $DIR_PATH"
+  cp "$BASH_SCRIPT_PATH" "$DIR_PATH"
 done
-
-echo "Finished distributing the script to all directories containing a Dockerfile."
