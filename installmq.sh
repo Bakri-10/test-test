@@ -1,76 +1,62 @@
 #!/bin/bash
 
-wget https://mtcad-my.sharepoint.com.mcas.ms/personal/balvinder_singh1_loblaw_ca/_layouts/15/download.aspx?SourceUrl=%2Fpersonal%2Fbalvinder%5Fsingh1%5Floblaw%5Fca%2FDocuments%2FSoftware%2F9%2E3%2E0%2E0%2DIBM%2DMQTRIAL%2DLinuxX64%2Etar%2Egz&McasTsid=15600
+# Path to the Dockerfile
+dockerfile_path="/home/bakri/Desktop/bode/Dockerfile" # Update this path to your Dockerfile location
 
-# Navigate to temporary directory
-echo "In /tmp"
-cd /tmp
+# Base URL with a COMPONENT placeholder
+base_url="https://bitnami.com/stack/COMPONENT/containers"
 
-# Enable error handling
-set -e
+# Ensure OS_ARCH is set, default to amd64 if not
+OS_ARCH="${OS_ARCH:-amd64}"
 
-# Variables
-MQ_TAR_FILE="9.3.4.0-IBM-MQ-Advanced-for-Developers-UbuntuLinuxX64.tar"
+# Temporary file to store the new COMPONENTS block
+temp_components_file=$(mktemp)
 
-# Display IBM files
-echo "Listing IBM files:"
-ls -lart | grep IBM
-echo "Results listed."
+# Function to curl and process a URL to find the latest version
+process_url() {
+    local url=$1
+    # Curl the website and process the output to find the latest version
+    curl -sL "$url" | \
+    sed -n '/Available versions/,/<\/ul>/p' | \
+    grep -oP '\d+\.\d+\.\d+-\d+' | \
+    sort -V | \
+    tail -n1
+}
 
-# Decompress the TAR file
-gunzip "$MQ_TAR_FILE"
-echo "File Unzipped"
+# Start the COMPONENTS block
+echo "COMPONENTS=( \\" > "$temp_components_file"
 
-# Extract files from the TAR archive
-tar -xvf "${MQ_TAR_FILE%.gz}"
-echo "File Untarred" 
-
-# Create directory for MQ installation
-mkdir /opt/mqm
-echo "Directory mqm created"
-
-
-# Set permissions for the mqm directory
-chmod 775 /opt/mqm
-
-# Navigate to the MQServer directory
-cd MQServer
-
-# Run the mqlicense.sh script
-./mqlicense.sh
-echo "License accepted"
-
-# Manually specify the RPM files
-rpm_files=(
-    "MQSeriesRuntime-9.2.0-5.x86_64.rpm"
-    "MQSeriesSDK-9.2.0-5.x86_64.rpm"
-    "MQSeriesSamples-9.2.0-5.x86_64.rpm"
-    "MQSeriesGSKit-9.2.0-5.x86_64.rpm"
-    "MQSeriesClient-9.2.0-5.x86_64.rpm"
-    "MQSeriesMan-9.2.0-5.x86_64.rpm"
-    "MQSeriesMsg_es-9.2.0-5.x86_64.rpm"
-    "MQSeriesJava-9.2.0-5.x86_64.rpm"
-    "MQSeriesServer-9.2.0-5.x86_64.rpm"
-    "MQSeriesJRE-9.2.0-5.x86_64.rpm"
-    "MQSeriesExplorer-9.2.0-5.x86_64.rpm"
-    "MQSeriesWeb-9.2.0-5.x86_64.rpm"
-)
-
-# Iterate over the array and install each RPM file
-for rpm_file in "${rpm_files[@]}"; do
-    echo "Installing $rpm_file"
-    rpm -ivh "$rpm_file"
+# Read the Dockerfile and process each component
+awk '/COMPONENTS=\(/,/\)/{if($1 ~ /"/) print $1}' "$dockerfile_path" | \
+sed 's/"//g' | \
+sed 's/\\//g' | \
+while IFS= read -r original_component; do
+    component=$(echo "$original_component" | cut -d'-' -f1)
+    # Construct the URL for the current component
+    url="${base_url/COMPONENT/$component}"
+    echo "Processing $url"
+    # Fetch the latest version of the component
+    latest_version=$(process_url "$url")
+    if [ -n "$latest_version" ]; then
+        # Construct the new component version string
+        new_component_version="${component}-${latest_version}-linux-${OS_ARCH}-debian-11"
+        echo "Latest version for $component: $new_component_version"
+    else
+        # Fallback to the original component version
+        new_component_version=$original_component
+        echo "Fallback to original version for $component: $new_component_version due to URL fetch failure."
+    fi
+    # Append the component version to the temp file
+    echo "  \"$new_component_version\" \\" >> "$temp_components_file"
 done
 
-# Return to the mqm/bin directory for post installation steps
-cd "/opt/mqm/bin"
+# Close the COMPONENTS block
+echo ")" >> "$temp_components_file"
 
-# Set the MQ environment
-source setmqenv -s -k
+# Replace the old COMPONENTS block in the Dockerfile with the new one
+sed -i "/COMPONENTS=(/,/)/c\\$(cat "$temp_components_file")" "$dockerfile_path"
 
-# Check if MQ is installed successfully
-if dspmqver; then
-  echo "IBM MQ is installed successfully."
-else
-  echo "IBM MQ installation failed."
-fi
+# Clean up the temporary file
+rm "$temp_components_file"
+
+echo "Dockerfile has been updated."
